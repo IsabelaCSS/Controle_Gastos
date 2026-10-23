@@ -1,17 +1,29 @@
 <!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Meus Gastos</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<div class="wrap">
-<header><h1>💰 Meus Gastos</h1>
-<div class="mn"><button class="s sm" onclick="mv(-1)">‹</button><b id="mlabel" onclick="cur=now;render()"></b><button class="s sm" onclick="mv(1)">›</button></div></header>
-<div id="app"></div></div>
-<button class="fab" id="fab" onclick="quick()" aria-label="Novo gasto">＋</button>
-<nav id="nav"></nav><div id="sheet"></div><div id="toast"></div>
-<script src="app.js"></script>
-
-</body>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Meus Gastos</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="notebook.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>💰 Meus Gastos</h1>
+        <div class="mn">
+          <button class="s sm" onclick="mv(-1)">‹</button>
+          <b id="mlabel" onclick="cur=now;render()"></b>
+          <button class="s sm" onclick="mv(1)">›</button>
+        </div>
+      </header>
+      <div id="app"></div>
+    </div>
+    <button class="fab" id="fab" onclick="quick()" aria-label="Novo gasto">＋</button>
+    <nav id="nav"></nav>
+    <div id="sheet"></div>
+    <div id="toast"></div>
+    <script src="app.js"></script>
+    <script src="extras.js"></script>
+  </body>
 </html>

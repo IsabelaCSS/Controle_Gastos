@@ -37,7 +37,7 @@ const now = ymOf(new Date());
 let cur = now,
   tab = "home",
   form = null;
-const sub = { contas: "fixed", metas: "cofres", debt: "mes" };
+const sub = { contas: "fixed", metas: "cofres", debt: "mes", kind: "todas" };
 S.fixed.forEach((x) => {
   x.id = x.id || uid();
 });
@@ -901,6 +901,10 @@ function debtsView() {
   if (sub.debt === "mes") a = a.filter((p) => !p[0].paid && hasInst(p[0], cur));
   else if (sub.debt === "aberto") a = a.filter((p) => !p[0].paid);
   else a = a.filter((p) => p[0].paid);
+    const nOwed = a.filter((p) => p[0].type === "owed").length,
+    nOwe = a.filter((p) => p[0].type === "owe").length;
+  if (sub.kind === "owe" || sub.kind === "owed")
+    a = a.filter((p) => p[0].type === sub.kind);
   a.sort(
     (p, q) =>
       String(p[0].due || "9999").localeCompare(String(q[0].due || "9999")) ||
@@ -911,6 +915,11 @@ function debtsView() {
     ["mes", "Deste mês"],
     ["aberto", "Em aberto"],
     ["pagas", "Pagas"],
+  ]);
+    h += seg("kind", [
+    ["todas", "Todas"],
+    ["owed", "📥 Me devem (" + nOwed + ")"],
+    ["owe", "📤 Eu devo (" + nOwe + ")"],
   ]);
   h += `<div class="card"><div class="ch"><h3>${sub.debt === "pagas" ? "Dívidas pagas" : sub.debt === "mes" ? "Dívidas de " + lab(cur) : "Todas em aberto"}</h3><button class="sm" onclick="openForm('debts')">＋ Nova</button></div>`;
   if (!a.length)
@@ -934,6 +943,19 @@ function debtsView() {
 ${expired ? '<small class="no">⚠️ O prazo já passou. Marque como quitado se já foi resolvido.</small>' : ""}</div><b class="${owed ? "ok" : "no"}">${fmt(x.val)}</b></div>
 <div class="bt">${!x.paid && hasInst(x, cur) ? `<button class="${pd ? "s " : ""}sm" onclick="payDebtM(${i})">${pd ? "↩ Desmarcar" : "✓ Paga em " + mname(cur)}</button>` : ""}<button class="${x.paid ? "s " : ""}sm" onclick="payDebt(${i})">${x.paid ? "↩ Reabrir" : "✓ Quitado"}</button><button class="ic" onclick="openForm('debts',${i})">✏️</button><button class="ic" onclick="del('debts',${i})">🗑️</button></div></div>`;
   });
+    if (sub.kind !== "todas" && a.length) {
+    const tv = a.reduce(
+      (s, p) =>
+        s +
+        (sub.debt === "mes"
+          ? p[0].val / (+p[0].parcels || 1)
+          : sub.debt === "aberto"
+            ? dleft(p[0])
+            : p[0].val),
+      0,
+    );
+    h += `<div class="rw tot"><span>${sub.kind === "owe" ? "Total que devo" : "Total que me devem"}</span><b class="${sub.kind === "owe" ? "no" : "ok"}">${fmt(tv)}</b></div>`;
+  }
   h += "</div>";
   h += `<div class="card">${row("Me devem (falta receber)", dtot("owed"), "ok")}${row("Eu devo (falta pagar)", -dtot("owe"), "no")}</div>`;
   return h;
@@ -1104,3 +1126,203 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "n" || e.key === "N") quick();
   else if (e.key >= "1" && e.key <= "5") go(TABS[e.key - 1][0]);
 });
+
+/* =====================================================================
+   DÍVIDAS — novo visual da aba Contas → Dívidas.
+   Carregue DEPOIS do app.js e do extras.js. Não altera nenhum outro arquivo.
+   Já inclui o filtro Todas / Me devem / Eu devo.
+   ===================================================================== */
+(function () {
+  if (typeof debtsView !== "function" || typeof S === "undefined") return;
+  sub.kind = sub.kind || "todas";
+
+  /* ---------- estilos (injetados, usam as cores do tema) ---------- */
+  const st = document.createElement("style");
+  st.textContent = `
+/* resumo */
+.dv-sum{padding:18px}
+.dv-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.dv-cols small{font-size:12.5px}
+.dv-cols b{display:block;margin-top:3px;font-size:clamp(15px,4.4vw,21px);letter-spacing:-.02em}
+.dv-split{display:flex;gap:2px;height:8px;margin:14px 0 8px;border-radius:99px;overflow:hidden;background:var(--in)}
+.dv-split i{display:block;height:100%}
+.dv-split .sp-ok{background:var(--ok)}
+.dv-split .sp-no{background:var(--no)}
+.dv-sum .hint{margin:0}
+
+/* barra de filtros */
+.dv-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px}
+.dv-bar .seg{margin:0;flex:1 1 300px;max-width:420px}
+.dv-fl{display:flex;flex-wrap:wrap;gap:6px}
+.fl{background:var(--card);color:var(--mu);border:1px solid var(--bd);border-radius:99px;padding:8px 14px;font-size:13.5px;font-weight:600}
+.fl.k-todas{--c:var(--ac)}
+.fl.k-owed{--c:var(--ok)}
+.fl.k-owe{--c:var(--no)}
+.fl.on{background:color-mix(in srgb,var(--c) 14%,var(--card));color:var(--c);border-color:var(--c)}
+.fl .n{display:inline-block;min-width:20px;margin-left:6px;padding:0 6px;border-radius:99px;background:var(--in);color:var(--mu);font-size:12px;text-align:center}
+.fl.on .n{background:color-mix(in srgb,var(--c) 22%,transparent);color:var(--c)}
+
+/* itens */
+.dv{display:grid;grid-template-columns:44px 1fr;gap:4px 12px;margin-top:10px;padding:14px;border-radius:16px;border-left:4px solid var(--c);background:color-mix(in srgb,var(--in) 60%,transparent)}
+.dv.ow{--c:var(--ok)}
+.dv.oe{--c:var(--no)}
+.dv.done{opacity:.72}
+.dv-av{grid-row:1;width:44px;height:44px;display:grid;place-items:center;border-radius:50%;font-size:18px;font-weight:800;color:var(--c);background:color-mix(in srgb,var(--c) 16%,transparent)}
+.dv-mn{grid-column:2;min-width:0}
+.dv-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.dv-nm{font-size:16px;word-break:break-word}
+.dv-val{font-size:18px;letter-spacing:-.02em;white-space:nowrap}
+.dv-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0 2px}
+.tag.t-ok{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.tag.t-no{background:color-mix(in srgb,var(--no) 15%,transparent);color:var(--no)}
+.dv-due{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;background:var(--in);color:var(--mu);font-size:12px;font-weight:600}
+.dv-due.soon{background:color-mix(in srgb,#d97706 18%,transparent);color:#d97706}
+.dv-due.late{background:color-mix(in srgb,var(--no) 16%,transparent);color:var(--no)}
+.dv-pr{height:6px;margin:8px 0 4px;border-radius:99px;overflow:hidden;background:color-mix(in srgb,var(--bd) 80%,transparent)}
+.dv-pr i{display:block;height:100%;border-radius:99px;background:var(--c)}
+.dv-act{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;margin-top:6px;padding-top:10px;border-top:1px dashed var(--bd)}
+
+/* vazio */
+.dv-empty{padding:28px 10px 18px;text-align:center}
+.dv-empty .em{font-size:40px;line-height:1}
+.dv-empty b{display:block;margin-top:8px;font-size:16px}
+.dv-empty button{margin-top:14px}
+
+@media(hover:hover){
+  .dv{transition:background .15s}
+  .dv:hover{background:var(--in)}
+  .fl:hover{border-color:var(--c)}
+}
+@media(min-width:700px){
+  #app>.dv-sum,#app>.dv-bar{column-span:all}
+}
+@media(min-width:1180px){
+  #app>.dv-sum{grid-column:1/-1;max-width:780px;padding:22px 24px}
+  #app>.dv-bar{grid-column:1/-1}
+  #app>.card.dv-list{grid-column:span 2}
+}
+`;
+  document.head.appendChild(st);
+
+  /* parcelas já resolvidas (meses passados ou marcados como pagos) */
+  const doneN = (x) => {
+    const p = +x.parcels || 1;
+    if (x.paid) return p;
+    let n = 0;
+    for (let k = 0; k < p; k++) {
+      const ym = sh(x.start, k);
+      if (diff(ym, now) > 0 || (x.pm && x.pm[ym])) n++;
+    }
+    return n;
+  };
+
+  function item(x, i) {
+    const pr = +x.parcels || 1,
+      owed = x.type === "owed",
+      pd = !!(x.pm && x.pm[cur]),
+      expired = !x.paid && diff(sh(x.start, pr - 1), now) > 0,
+      tg = owed
+        ? x.src === "cartao"
+          ? "na minha fatura"
+          : x.src === "empresa"
+            ? "desconta do salário"
+            : "débito"
+        : "";
+    let due = "";
+    if (x.due && !x.paid) {
+      const n = daysTo(x.due);
+      due = `<span class="dv-due${n < 0 ? " late" : n <= 3 ? " soon" : ""}">📅 ${fdate(x.due)} · ${when(n)}</span>`;
+    }
+    let prog;
+    if (pr > 1) {
+      const d = doneN(x);
+      prog = `<div class="dv-pr"><i style="width:${(d / pr) * 100}%"></i></div><small>${d} de ${pr} pagas · ${lab(x.start)} até ${lab(sh(x.start, pr - 1))}</small>`;
+    } else prog = `<small>1 parcela · só em ${lab(x.start)}</small>`;
+
+    return `<div class="dv ${owed ? "ow" : "oe"}${x.paid ? " done" : ""}">
+<div class="dv-av">${esc((x.name || "?").trim().charAt(0).toUpperCase())}</div>
+<div class="dv-mn">
+<div class="dv-top"><div class="g1"><b class="dv-nm">${esc(x.name)}</b>${x.why ? `<small>${esc(x.why)}</small>` : ""}</div>
+<div class="rt"><b class="dv-val ${owed ? "ok" : "no"}">${fmt(x.val / pr)}</b>${pr > 1 ? `<small>total ${fmt(x.val)}</small>` : ""}</div></div>
+<div class="dv-tags"><span class="tag ${owed ? "t-ok" : "t-no"}">${owed ? "me deve" : "eu devo"}</span>${tg ? `<span class="tag">${tg}</span>` : ""}${pd && !x.paid ? `<span class="tag t-ok">✓ paga em ${mname(cur)}</span>` : ""}${x.paid ? '<span class="tag">quitada</span>' : ""}${due}</div>
+${prog}
+${expired ? '<small class="no">⚠️ O prazo já passou. Marque como quitado se já foi resolvido.</small>' : ""}
+</div>
+<div class="dv-act">${!x.paid && hasInst(x, cur) ? `<button class="${pd ? "s " : ""}sm" onclick="payDebtM(${i})">${pd ? "↩ Desmarcar" : "✓ Paga em " + mname(cur)}</button>` : ""}<button class="${x.paid ? "s " : ""}sm" onclick="payDebt(${i})">${x.paid ? "↩ Reabrir" : "✓ Quitado"}</button><button class="ic" aria-label="Editar" onclick="openForm('debts',${i})">✏️</button><button class="ic" aria-label="Excluir" onclick="del('debts',${i})">🗑️</button></div>
+</div>`;
+  }
+
+  debtsView = function () {
+    const rc = dvm(cur, "owed"),
+      dv = dvm(cur, "owe"),
+      net = rc - dv,
+      tt = rc + dv;
+    let a = S.debts.map((x, i) => [x, i]);
+    if (sub.debt === "mes") a = a.filter((p) => !p[0].paid && hasInst(p[0], cur));
+    else if (sub.debt === "aberto") a = a.filter((p) => !p[0].paid);
+    else a = a.filter((p) => p[0].paid);
+    const nOwed = a.filter((p) => p[0].type === "owed").length,
+      nOwe = a.filter((p) => p[0].type === "owe").length;
+    if (sub.kind === "owe" || sub.kind === "owed")
+      a = a.filter((p) => p[0].type === sub.kind);
+    a.sort(
+      (p, q) =>
+        String(p[0].due || "9999").localeCompare(String(q[0].due || "9999")) ||
+        String(p[0].start).localeCompare(String(q[0].start)),
+    );
+
+    /* resumo */
+    let h = `<div class="card dv-sum"><div class="dv-cols">
+<div><small>📥 Vou receber em ${mname(cur)}</small><b class="ok">${fmt(rc)}</b></div>
+<div><small>📤 Vou pagar em ${mname(cur)}</small><b class="no">${fmt(dv)}</b></div>
+<div><small>Saldo do mês</small><b class="${net >= 0 ? "ok" : "no"}">${fmt(net)}</b></div></div>
+<div class="dv-split">${tt > 0 ? `<i class="sp-ok" style="width:${(rc / tt) * 100}%"></i><i class="sp-no" style="width:${(dv / tt) * 100}%"></i>` : ""}</div>
+<small class="hint">Em aberto no total: receber <b class="ok">${fmt(dtot("owed"))}</b> · pagar <b class="no">${fmt(dtot("owe"))}</b></small></div>`;
+
+    /* filtros: período + tipo na mesma linha */
+    const KS = [
+      ["todas", "Todas", nOwed + nOwe],
+      ["owed", "📥 Me devem", nOwed],
+      ["owe", "📤 Eu devo", nOwe],
+    ];
+    h += `<div class="dv-bar">${seg("debt", [
+      ["mes", "Deste mês"],
+      ["aberto", "Em aberto"],
+      ["pagas", "Pagas"],
+    ])}<div class="dv-fl">${KS.map((k) => `<button class="fl k-${k[0]}${sub.kind === k[0] ? " on" : ""}" onclick="setSub('kind','${k[0]}')">${k[1]}<span class="n">${k[2]}</span></button>`).join("")}</div></div>`;
+
+    /* lista */
+    h += `<div class="card dv-list"><div class="ch"><h3>${sub.debt === "pagas" ? "Dívidas pagas" : sub.debt === "mes" ? "Dívidas de " + lab(cur) : "Todas em aberto"}</h3><button class="sm" onclick="openForm('debts')">＋ Nova</button></div>`;
+    if (!a.length) {
+      const msg =
+        sub.kind === "owed"
+          ? "Ninguém te deve neste filtro"
+          : sub.kind === "owe"
+            ? "Você não deve nada neste filtro"
+            : sub.debt === "pagas"
+              ? "Nenhuma dívida paga ainda"
+              : sub.debt === "mes"
+                ? "Nenhuma parcela neste mês"
+                : "Nenhuma dívida em aberto";
+      h += `<div class="dv-empty"><div class="em">🎉</div><b>${msg}</b><button class="sm" onclick="openForm('debts')">＋ Nova dívida</button></div>`;
+    } else a.forEach((p) => (h += item(p[0], p[1])));
+
+    if (sub.kind !== "todas" && a.length) {
+      const tv = a.reduce(
+        (s, p) =>
+          s +
+          (sub.debt === "mes"
+            ? p[0].val / (+p[0].parcels || 1)
+            : sub.debt === "aberto"
+              ? dleft(p[0])
+              : p[0].val),
+        0,
+      );
+      h += `<div class="rw tot"><span>${sub.kind === "owe" ? "Total que devo" : "Total que me devem"}</span><b class="${sub.kind === "owe" ? "no" : "ok"}">${fmt(tv)}</b></div>`;
+    }
+    return h + "</div>";
+  };
+  try {
+    render();
+  } catch (e) {}
+})();

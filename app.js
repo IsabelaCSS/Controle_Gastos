@@ -147,6 +147,18 @@ const linked = (ym, src) =>
   );
 const dvs = (ym, src) =>
   linked(ym, src).reduce((s, x) => s + x.val / (+x.parcels || 1), 0);
+/* parcelas de "me devem" já recebidas (marcadas como pagas ou quitadas):
+   entram como renda no mês, qualquer que seja a origem (cartão, débito, empresa) */
+const rcv = (ym) =>
+  S.debts
+    .filter(
+      (x) =>
+        x.type === "owed" &&
+        ok(x, ym) &&
+        hasInst(x, ym) &&
+        ((x.pm && x.pm[ym]) || (x.paid && diff(now, ym) <= 0)),
+    )
+    .reduce((s, x) => s + x.val / (+x.parcels || 1), 0);
 function dleft(x) {
   const p = +x.parcels || 1;
   if (x.paid) return 0;
@@ -178,7 +190,7 @@ function calc(ym, fat) {
   const m = mg(ym);
   if (fat == null && m.closed) {
     const r = Object.assign(
-      { ug: 0, dv: 0, rc: 0, sv: 0, t3: 0, est: 0, avc: 0, carry: 0 },
+      { ug: 0, dv: 0, rc: 0, rcv: 0, sv: 0, t3: 0, est: 0, avc: 0, carry: 0 },
       m.closed.snap,
     );
     if (r.own == null) r.own = r.left - r.carry;
@@ -196,12 +208,13 @@ function calc(ym, fat) {
   const av = sum((m.exp || []).filter((x) => x.pay !== "credito")),
     avc = sum((m.exp || []).filter((x) => x.pay === "credito")),
     dv = dvm(ym, "owe"),
-    rc = dvm(ym, "owed");
+    rc = dvm(ym, "owed"),
+    rv = rcv(ym);
   const mm = +ym.split("-")[1],
     t3 = mm === 11 ? S.t13[0] : mm === 12 ? S.t13[1] : 0;
   const sv = sum(S.sv.filter((x) => x.kind === "dep" && x.ym === ym));
   const cr = carryIn(ym),
-    inc = sal + ex + t3;
+    inc = sal + ex + t3 + rv;
   let out = fx + cd + op + av + dv + sv,
     ug = 0;
   if (m.real != null) {
@@ -212,6 +225,7 @@ function calc(ym, fat) {
     sal,
     ex,
     t3,
+    rcv: rv,
     fx,
     cd,
     est,
@@ -794,8 +808,8 @@ ${m.real != null && c.ug < -0.005 ? `<div class="note good">Sobrou <b>${fmt(-c.u
   else if (cur <= now)
     h += `<div class="card lk"><span>Terminou o mês? Feche para travar os valores.</span><button class="sm" onclick="closeM()">🔒 Fechar mês</button></div>`;
   const h0 = h.length;
-  h += `<div class="card"><h3>Detalhes de ${lab(cur)}</h3>${row("Salário líquido", c.sal, "ok")}${c.carry > 0.005 ? row("Sobra de " + mname(pv) + " (somada)", c.carry, "ok") : ""}${c.ex ? row("Renda extra", c.ex, "ok") : ""}${c.t3 ? row("13º salário", c.t3, "ok") : ""}${row("Contas fixas", -c.fx, "no")}${row(cl || m.fat != null ? "Fatura do cartão (real)" : "Fatura do cartão (estimada)", -c.cd, "no")}${c.op ? row("Desconto de pedidos da empresa", -c.op, "no") : ""}${c.dv ? row("Parcelas de dívidas que devo", -c.dv, "no") : ""}${c.av ? row("Gastos avulsos (débito/pix)", -c.av, "no") : ""}${c.sv ? row("Guardado nos cofres", -c.sv, "no") : ""}${Math.abs(c.ug) > 0.005 ? row(c.ug > 0 ? "Gastos não identificados" : "Diferença a favor", -c.ug, c.ug > 0 ? "no" : "ok") : ""}</div>`;
-  h += `<div class="card"><h3>🤝 Dívidas em aberto</h3>${row("Me devem (falta receber)", dtot("owed"), "ok")}${row("Eu devo (falta pagar)", -dtot("owe"), "no")}${row("Sobra do mês + o que vão me pagar nele", c.left + c.rc, c.left + c.rc >= 0 ? "ok" : "no")}</div>`;
+  h += `<div class="card"><h3>Detalhes de ${lab(cur)}</h3>${row("Salário líquido", c.sal, "ok")}${c.carry > 0.005 ? row("Sobra de " + mname(pv) + " (somada)", c.carry, "ok") : ""}${c.ex ? row("Renda extra", c.ex, "ok") : ""}${c.t3 ? row("13º salário", c.t3, "ok") : ""}${c.rcv ? row("Recebido de dívidas (Pix)", c.rcv, "ok") : ""}${row("Contas fixas", -c.fx, "no")}${row(cl || m.fat != null ? "Fatura do cartão (real)" : "Fatura do cartão (estimada)", -c.cd, "no")}${c.op ? row("Desconto de pedidos da empresa", -c.op, "no") : ""}${c.dv ? row("Parcelas de dívidas que devo", -c.dv, "no") : ""}${c.av ? row("Gastos avulsos (débito/pix)", -c.av, "no") : ""}${c.sv ? row("Guardado nos cofres", -c.sv, "no") : ""}${Math.abs(c.ug) > 0.005 ? row(c.ug > 0 ? "Gastos não identificados" : "Diferença a favor", -c.ug, c.ug > 0 ? "no" : "ok") : ""}</div>`;
+  h += `<div class="card"><h3>🤝 Dívidas em aberto</h3>${row("Me devem (falta receber)", dtot("owed"), "ok")}${row("Eu devo (falta pagar)", -dtot("owe"), "no")}${row("Sobra do mês + o que vão me pagar nele", c.left + (c.rc - c.rcv), c.left + (c.rc - c.rcv) >= 0 ? "ok" : "no")}</div>`;
   h += `<div class="card"><h3>🔮 Previsão de ${lab(nx)}</h3>${row("Salário previsto", n.sal, "ok")}${n.carry > 0.005 ? row("Sobra de " + mname(cur) + " (somada)", n.carry, "ok") : ""}${n.t3 ? row("13º salário", n.t3, "ok") : ""}${row("Contas fixas", -n.fx, "no")}${row("Fatura do cartão", -n.cd, "no")}${n.op ? row("Desconto de pedidos da empresa", -n.op, "no") : ""}${n.dv ? row("Parcelas de dívidas que devo", -n.dv, "no") : ""}<div class="rw tot"><span>Deve sobrar (sem avulsos)</span><b class="${n.left >= 0 ? "ok" : "no"}">${fmt(n.left)}</b></div></div>`;
   const tl = h.slice(h0);
   h = h.slice(0, h0);
@@ -809,7 +823,7 @@ function monthTab() {
   let h = "";
   if (cl)
     h += `<div class="card lk"><span>🔒 ${lab(cur)} está fechado.</span><button class="s sm" onclick="reopen()">Reabrir</button></div>`;
-  h += `<div class="card"><h3>💵 Salário de ${lab(cur)}</h3><div class="fg" style="margin-top:8px"><label>Salário líquido deste mês</label><input type="number" step="any" inputmode="decimal" value="${c.sal}" onchange="setM('sal',this.value)"${cl ? " disabled" : ""}></div>${c.carry > 0.005 ? row("Sobra de " + mname(sh(cur, -1)) + " (somada ao mês)", c.carry, "ok") : ""}${c.t3 ? row("13º salário (Ajustes em Mais)", c.t3, "ok") : ""}</div>`;
+  h += `<div class="card"><h3>💵 Salário de ${lab(cur)}</h3><div class="fg" style="margin-top:8px"><label>Salário líquido deste mês</label><input type="number" step="any" inputmode="decimal" value="${c.sal}" onchange="setM('sal',this.value)"${cl ? " disabled" : ""}></div>${c.carry > 0.005 ? row("Sobra de " + mname(sh(cur, -1)) + " (somada ao mês)", c.carry, "ok") : ""}${c.t3 ? row("13º salário (Ajustes em Mais)", c.t3, "ok") : ""}${c.rcv ? row("Recebido de dívidas (Pix)", c.rcv, "ok") : ""}</div>`;
   h += list(
     "exp",
     "🛒 Gastos avulsos",
@@ -901,7 +915,7 @@ function debtsView() {
   if (sub.debt === "mes") a = a.filter((p) => !p[0].paid && hasInst(p[0], cur));
   else if (sub.debt === "aberto") a = a.filter((p) => !p[0].paid);
   else a = a.filter((p) => p[0].paid);
-    const nOwed = a.filter((p) => p[0].type === "owed").length,
+  const nOwed = a.filter((p) => p[0].type === "owed").length,
     nOwe = a.filter((p) => p[0].type === "owe").length;
   if (sub.kind === "owe" || sub.kind === "owed")
     a = a.filter((p) => p[0].type === sub.kind);
@@ -916,7 +930,7 @@ function debtsView() {
     ["aberto", "Em aberto"],
     ["pagas", "Pagas"],
   ]);
-    h += seg("kind", [
+  h += seg("kind", [
     ["todas", "Todas"],
     ["owed", "📥 Me devem (" + nOwed + ")"],
     ["owe", "📤 Eu devo (" + nOwe + ")"],
@@ -943,7 +957,7 @@ function debtsView() {
 ${expired ? '<small class="no">⚠️ O prazo já passou. Marque como quitado se já foi resolvido.</small>' : ""}</div><b class="${owed ? "ok" : "no"}">${fmt(x.val)}</b></div>
 <div class="bt">${!x.paid && hasInst(x, cur) ? `<button class="${pd ? "s " : ""}sm" onclick="payDebtM(${i})">${pd ? "↩ Desmarcar" : "✓ Paga em " + mname(cur)}</button>` : ""}<button class="${x.paid ? "s " : ""}sm" onclick="payDebt(${i})">${x.paid ? "↩ Reabrir" : "✓ Quitado"}</button><button class="ic" onclick="openForm('debts',${i})">✏️</button><button class="ic" onclick="del('debts',${i})">🗑️</button></div></div>`;
   });
-    if (sub.kind !== "todas" && a.length) {
+  if (sub.kind !== "todas" && a.length) {
     const tv = a.reduce(
       (s, p) =>
         s +
